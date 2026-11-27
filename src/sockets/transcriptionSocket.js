@@ -96,9 +96,11 @@ const initTranscriptionSocket = (io) => {
       session.isProcessing = true;
       session.hasPending = false;
 
+      const aiServiceUrl = process.env.AI_SERVICE_URL || "http://127.0.0.1:8000";
+
       try {
         const audioBuffer = Buffer.concat(session.chunks);
-        if (audioBuffer.length < 1000 && !isFinal) {
+        if (audioBuffer.length < 500 && !isFinal) {
           session.isProcessing = false;
           return;
         }
@@ -111,7 +113,7 @@ const initTranscriptionSocket = (io) => {
           formData.append("language", session.language);
         }
 
-        const aiRes = await fetch(`${AI_SERVICE_URL}/transcribe`, {
+        const aiRes = await fetch(`${aiServiceUrl}/transcribe`, {
           method: "POST",
           body: formData,
         });
@@ -171,9 +173,9 @@ const initTranscriptionSocket = (io) => {
       if (chunkBuffer && chunkBuffer.length > 0) {
         session.chunks.push(chunkBuffer);
 
-        // Process incrementally when buffer reaches reasonable size
+        // Process incrementally when buffer reaches reasonable size (~3s)
         const totalBytes = session.chunks.reduce((acc, c) => acc + c.length, 0);
-        if (totalBytes >= 32000 && !session.isProcessing) {
+        if (totalBytes >= 12000 && !session.isProcessing) {
           processBuffer(false);
         }
       }
@@ -184,11 +186,21 @@ const initTranscriptionSocket = (io) => {
       console.log(`[Socket] Stopping transcription session for ${socket.id}`);
       session.active = false;
 
-      // Final processing pass
+      // Wait if an intermediate chunk is currently being processed
+      while (session.isProcessing) {
+        await new Promise((r) => setTimeout(r, 150));
+      }
+
+      // Final processing pass with all concatenated audio
       await processBuffer(true);
 
+      // Wait for final pass to complete
+      while (session.isProcessing) {
+        await new Promise((r) => setTimeout(r, 150));
+      }
+
       const duration = session.startTime ? Math.round((Date.now() - session.startTime) / 1000) : 0;
-      const finalText = session.fullText || session.lastEmittedText || "";
+      const finalText = (session.fullText || session.lastEmittedText || "").trim();
 
       socket.emit("transcription_complete", {
         text: finalText,
