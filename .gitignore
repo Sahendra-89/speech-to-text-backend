@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment variables & secrets (CRITICAL: NEVER COMMIT)
+.env
+.env.*
+*.env
+*.env.*
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Prisma generated artifacts
+# Note: prisma generate will run during postinstall on Render
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
