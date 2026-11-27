@@ -186,12 +186,25 @@ const initTranscriptionSocket = (io) => {
       console.log(`[Socket] Stopping transcription session for ${socket.id}`);
       session.active = false;
 
+      // If client sent complete recorded audio in final stop payload, use it!
+      if (data?.audioBase64) {
+        try {
+          const fullAudioBuffer = Buffer.from(data.audioBase64, "base64");
+          if (fullAudioBuffer && fullAudioBuffer.length > 500) {
+            session.chunks = [fullAudioBuffer];
+            if (data.format) session.format = data.format;
+          }
+        } catch (b64Err) {
+          console.warn("[Socket] Error parsing final audioBase64:", b64Err.message);
+        }
+      }
+
       // Wait if an intermediate chunk is currently being processed
       while (session.isProcessing) {
         await new Promise((r) => setTimeout(r, 150));
       }
 
-      // Final processing pass with all concatenated audio
+      // Final processing pass with all audio
       await processBuffer(true);
 
       // Wait for final pass to complete
