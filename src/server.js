@@ -10,41 +10,23 @@ const initTranscriptionSocket = require("./sockets/transcriptionSocket");
 const app = express();
 const server = http.createServer(app);
 
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-  process.env.FRONTEND_URL,
-].filter(Boolean);
-
-const isAllowedOrigin = (origin) => {
-  if (!origin) return true;
-  if (allowedOrigins.includes(origin)) return true;
-  if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return true;
-  if (/\.vercel\.app$/.test(origin)) return true;
-  return false;
+// Allow all origins dynamically (supporting Vercel, localhost, previews)
+const corsOptions = {
+  origin: (origin, callback) => {
+    callback(null, true);
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  credentials: true,
 };
 
 // Initialize Socket.io
 const io = new Server(server, {
-  cors: {
-    origin: (origin, callback) => {
-      callback(null, isAllowedOrigin(origin));
-    },
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true,
-  },
+  cors: corsOptions,
   transports: ["polling", "websocket"],
 });
 
 // Middlewares
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      callback(null, isAllowedOrigin(origin));
-    },
-    credentials: true,
-  })
-);
+app.use(cors(corsOptions));
 app.use(express.raw({ type: ["audio/*", "application/octet-stream"], limit: "50mb" }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));

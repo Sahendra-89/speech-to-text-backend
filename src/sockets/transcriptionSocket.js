@@ -7,8 +7,6 @@ const prisma = require("../config/database");
  * and duplicate-text prevention.
  */
 
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://127.0.0.1:8000";
-
 // Helper to compute delta words between previous and current text
 function computeTextDelta(previousText, currentText) {
   if (!currentText || !currentText.trim()) return "";
@@ -52,7 +50,9 @@ const initTranscriptionSocket = (io) => {
     const session = {
       active: false,
       title: "Live Transcription",
-      language: null,
+      requestedLanguage: null, // What user selected (e.g. "hi", "es", or null for auto)
+      detectedLanguage: null,  // What AI returned
+      effectiveLanguage: "en", // Resolved language
       format: "webm",
       chunks: [],
       startTime: null,
@@ -66,6 +66,7 @@ const initTranscriptionSocket = (io) => {
     socket.on("start_transcription", (data = {}) => {
       session.active = true;
       session.title = data.title || "Live Transcription";
+
       let reqLang = data.language;
       if (typeof reqLang === "string") {
         const trimmed = reqLang.trim().toLowerCase();
@@ -73,7 +74,10 @@ const initTranscriptionSocket = (io) => {
       } else {
         reqLang = null;
       }
-      session.language = reqLang;
+
+      session.requestedLanguage = reqLang;
+      session.detectedLanguage = null;
+      session.effectiveLanguage = reqLang || "en";
       session.format = (data.format || "webm").replace(/^\./, "").toLowerCase();
       session.chunks = [];
       session.startTime = Date.now();
@@ -82,7 +86,9 @@ const initTranscriptionSocket = (io) => {
       session.isProcessing = false;
       session.hasPending = false;
 
-      console.log(`[Socket] Started transcription session for ${socket.id} (language: ${session.language || "auto"}, format: ${session.format})`);
+      console.log(
+        `[Socket] Started transcription session for ${socket.id} (requestedLanguage: ${session.requestedLanguage || "auto"}, format: ${session.format})`
+      );
       socket.emit("transcription_ready", { status: "ready", socketId: socket.id });
     });
 
@@ -109,8 +115,10 @@ const initTranscriptionSocket = (io) => {
         const blob = new Blob([audioBuffer]);
         const formData = new FormData();
         formData.append("file", blob, filename);
-        if (session.language) {
-          formData.append("language", session.language);
+
+        // ONLY pass explicit language if user chosen one. Never lock in ambient noise detection.
+        if (session.requestedLanguage) {
+          formData.append("language", session.requestedLanguage);
         }
 
         const aiRes = await fetch(`${aiServiceUrl}/transcribe`, {
@@ -121,7 +129,11 @@ const initTranscriptionSocket = (io) => {
         if (aiRes.ok) {
           const aiData = await aiRes.json();
           const currentText = (aiData.text || "").trim();
-          session.language = aiData.language || session.language;
+
+          if (aiData.language) {
+            session.detectedLanguage = aiData.language;
+          }
+          session.effectiveLanguage = session.requestedLanguage || session.detectedLanguage || "en";
 
           if (currentText) {
             const delta = computeTextDelta(session.lastEmittedText, currentText);
@@ -133,7 +145,7 @@ const initTranscriptionSocket = (io) => {
               socket.emit("transcription_chunk", {
                 text: currentText,
                 delta: delta,
-                language: session.language,
+                language: session.effectiveLanguage,
                 languageProbability: aiData.language_probability,
                 isFinal: isFinal,
               });
@@ -186,6 +198,17 @@ const initTranscriptionSocket = (io) => {
       console.log(`[Socket] Stopping transcription session for ${socket.id}`);
       session.active = false;
 
+      if (data?.language) {
+        let stopLang = data.language;
+        if (typeof stopLang === "string") {
+          const trimmed = stopLang.trim().toLowerCase();
+          if (trimmed && !["auto", "none", "null", "undefined"].includes(trimmed)) {
+            session.requestedLanguage = trimmed;
+            session.effectiveLanguage = trimmed;
+          }
+        }
+      }
+
       // If client sent complete recorded audio in final stop payload, use it!
       if (data?.audioBase64) {
         try {
@@ -217,7 +240,7 @@ const initTranscriptionSocket = (io) => {
 
       socket.emit("transcription_complete", {
         text: finalText,
-        language: session.language,
+        language: session.effectiveLanguage,
         duration: duration,
       });
 
@@ -228,7 +251,7 @@ const initTranscriptionSocket = (io) => {
             data: {
               title: data.title || session.title || "Live Transcription",
               text: finalText,
-              language: session.language,
+              language: session.effectiveLanguage,
               duration: duration,
             },
           });
