@@ -263,7 +263,7 @@ exports.transcribeAudio = async (req, res) => {
     let aiResponse;
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+      const timeoutId = setTimeout(() => controller.abort(), 180000); // 180s timeout
 
       aiResponse = await fetch(`${AI_SERVICE_URL}/transcribe`, {
         method: "POST",
@@ -276,7 +276,7 @@ exports.transcribeAudio = async (req, res) => {
       if (networkError.name === "AbortError") {
         return res.status(504).json({
           success: false,
-          message: "AI service request timed out after 60 seconds."
+          message: "AI service request timed out after 180 seconds."
         });
       }
       return res.status(503).json({
